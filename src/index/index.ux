@@ -1,0 +1,54 @@
+<import name="choosecity" src="../Components/Choosecity/choosecity"></import>
+<template>
+	<div class="container">
+		<div class="cell"><text>当前省份：{{ currentProvince }}</text></div>
+		<div class="cell"><text>当前城市：{{ currentCity }}</text></div>
+		<div class="btnbox">
+			<input class="btn" type="button" value="点击选择城市" onclick="setShowCity"></input>
+		</div>
+		<choosecity></choosecity>
+	</div>
+</template>
+<script>
+	export default {
+		private: {
+			currentProvince: '',
+			currentCity: '',
+		},
+		onInit() {
+			const _this = this
+			_this.$on('onChooseCity', _this.onChooseCity)
+		},
+		setShowCity(){
+			this.$broadcast('setShowCity',{ isShow:1 })
+		},
+		onChooseCity(obj) {
+			this.currentCity = obj.detail.city
+			this.currentProvince = obj.detail.province
+			// console.log(this.currentProvince,this.currentCity)
+		},
+	}
+</script>
+<style lang="less">
+	.container{
+		flex-direction: column;
+		.cell{
+			padding: 10px 0;
+			text{
+				font-size: 14px;
+			}
+		}
+		.btnbox{
+			justify-content: center;
+			margin-top: 15px;
+			.btn{
+				color: #ffffff;
+				width: 300px;
+				height: 40px;
+				font-size: 16px;
+				border-radius: 4px;
+				background-color: #0000ff;
+			}
+		}
+	}
+</style>

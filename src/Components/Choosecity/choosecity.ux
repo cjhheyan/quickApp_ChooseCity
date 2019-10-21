@@ -1,0 +1,554 @@
+<template>
+	<div>
+		<div class="container" if="{{showchoosecity}}">
+			<div class="choose-city-wrapper">
+				<div class="choose-title">
+					<div class="close" onclick="onSelectCityTap(chooseCurrentCity)">
+						<image src="/Common/close.png"></image>
+					</div>
+					<text class="t">选择城市</text>
+				</div>
+				<div class="choose-city-body">
+					<list id="list" style="{{'height:'+windowHeight+'px'}}">
+						<list-item class="list-head" type="currentCity">
+							<div class="current-city-box">
+								<div class="current-city-title"><text>定位城市</text></div>
+								<div class="city-item" data-cityname="{{positionCity}}" onclick="onSelectCityTap(positionCity)">
+									<image src="/Common/location.png"></image>
+									<text>{{ positionCity }}</text>
+								</div>
+							</div>
+							<div class="hot-city-box">
+								<div class="hot-city-title" id="word0" data-id="0"><text>热门城市</text></div>
+								<div class="hot-city-list">
+									<text class="city-item" for="(idx,val) in cityData.hotCityList" if="{{idx<3}}" data-cityname="{{val.name}}" onclick="onSelectCityTap(val.name)">
+										{{ val.name }}
+									</text>
+								</div>
+								<div class="hot-city-list">
+									<text class="city-item" for="(idx,val) in cityData.hotCityList" if="{{idx<6 && idx > 2}}" data-cityname="{{val.name}}" onclick="onSelectCityTap(val.name)">
+										{{ val.name }}
+									</text>
+								</div>
+							</div>
+						</list-item>
+						<block for="(idx,value) in cityData.cityList">
+							<list-item type="city">
+								<div class="city-word-box">
+									<text class="city-word-title" id="word{{idx+1}}" data-id="{{idx+1}}">{{value.wordName}}</text>
+									<div class="city-word-list">
+										<div class="city-item" for=" (key,val) in value.list" data-cityname="{{val.name}}" onclick="onSelectCityTap(val.name,value.name)">
+											<text>{{ val.name }}</text>
+											<div class="line"></div>
+										</div>
+									</div>
+								</div>
+							</list-item>
+						</block>
+					</list>
+				</div>
+			</div>
+			<text class="show-word" if="{{currentWord!=''}}">{{currentWord}}</text>
+			<div id="wordBox" class="word-box {{isWordBoxTouch?'touch':''}}" style="top:{{wordBoxTop}}px" @touchstart="wordTouchStart" @touchmove="wordTouchMove" @touchend="wordTouchEnd">
+				<div class="word-item"><text>#</text></div>
+				<div class="word-item" for="(key,item) in cityData.wordData" onclick="wordClick(key,item)">
+					<text>{{item}}</text>
+				</div>
+			</div>
+		</div>
+	</div>
+</template>
+<script>
+/* eslint-disable semi */
+/* eslint-disable linebreak-style */
+/* eslint-disable no-console */
+/* eslint-disable linebreak-style */
+/* eslint-disable no-dupe-keys */
+/* eslint-disable linebreak-style */
+/* eslint-disable no-undef */
+/* eslint-disable indent */
+/* eslint-disable no-unused-vars */
+/* eslint-disable quotes */
+import storage from '@system.storage'
+import device from '@system.device'
+import prompt from '@system.prompt'
+import geolocation from '@system.geolocation'
+import CityDataList from './data.js'
+var QQMapWX = require('../../utils/qqmap-wx-jssdk.js')
+var amapFile = require('../../utils/amap-quickapp.js')
+var myAmapFun,qqmapsdk
+export default ({
+	props: [],
+	data: function () {
+		return {
+			isWordBoxTouch: false,
+			windowWidth: 0,
+			windowHeight: 0,
+			showchoosecity: 0,
+			positionCity: '',
+			chooseCurrentCity: '',
+			chooseCurrentProvince: '',
+			chooseCurrentCityCode: null,
+			cityData: CityDataList,
+			wordData: [],
+			wordBoxTop: 0,
+			currentWord: '',
+			scrollTopId: '',
+			num: 0,
+			scrollNum: 0
+		}
+	},
+	onInit() {
+		const _this = this;
+		storage.get({
+			key: 'locationCityData',
+			success: function (locationCityData) {
+				if (locationCityData) {
+					locationCityData = JSON.parse(locationCityData)
+					if (new Date().getTime() < locationCityData.timemap + 3 * 24 * 60 * 60 * 1000) {
+						_this.chooseCurrentCity = locationCityData.city
+						_this.positionCity = locationCityData.city
+					} else {
+						storage.delete({ key: 'locationCityData' })
+					}
+				}
+			},
+		})
+
+		storage.get({
+			key: 'cityNameCnData',
+			success: function (alSortCityData) {
+				if (!alSortCityData) {
+					if (_this.cityData) {
+						_this.init(_this.cityData)
+					}
+				} else {
+					let resultWordData = ["#"];
+					alSortCityData = JSON.parse(alSortCityData)
+					alSortCityData.wordData.map(val => {
+						return resultWordData.push(val);
+					});
+					_this.cityData = alSortCityData;
+					_this.wordData = resultWordData;
+				}
+			}
+		})
+		_this.positionCity()
+		device.getInfo({
+			success: function (systemInfo) {
+				_this.windowHeight = systemInfo.windowHeight - 50 + 'px';
+				_this.windowWidth = systemInfo.windowWidth - 50 + 'px';
+				_this.lineHeight = 460 / 23;
+				_this.wordBoxTop = parseInt((systemInfo.windowHeight / systemInfo.screenDensity - 460) / 2)
+			}
+		});
+		_this.$on('setShowCity', _this.setShowCity)
+	},
+	init(cityData) {
+		let allCityData = []; //未拆分排序所有城市
+		let cityNameCnData = []; //已拆分排序所有城市
+		let wordData = []; //所有城市字母
+		cityData.cityList.map((val) => {
+			allCityData = allCityData.concat(val.list);
+		});
+
+		allCityData.map(function (item) {
+			wordData.push((item.nameCn.substr(0, 1)).toLocaleUpperCase());
+		});
+
+		wordData = [...new Set(wordData)].sort();
+		wordData.map((value) => {
+			let chacheData = [];
+			for (let i = 0; i < allCityData.length; i++) {
+				if ((allCityData[i].nameCn.substr(0, 1)).toLocaleUpperCase() === value) {
+					chacheData.push(allCityData[i])
+				}
+			}
+			cityNameCnData.push({
+				wordName: value.toLocaleUpperCase(),
+				list: chacheData
+			})
+		});
+
+		cityNameCnData[1].list.push({
+			name: "北京",
+			nameCn: "beijing",
+			areaCode: "110100000000"
+		});
+		cityNameCnData[2].list.push({
+			name: "重庆",
+			nameCn: "chongqing",
+			areaCode: "500100000000"
+		});
+		cityNameCnData[16].list.push({
+			name: "上海",
+			nameCn: "shanghai",
+			areaCode: "310100000000"
+		});
+		cityNameCnData[17].list.push({
+			name: "天津",
+			nameCn: "tianjin",
+			areaCode: "120100000000"
+		});
+
+		let resultCityData = {
+			hotCityList: cityData.hotCityList,
+			cityList: cityNameCnData,
+			wordData: wordData
+		};
+
+		//存储已拆分排序所有城市及热门城市数据
+		storage.set({
+			key: 'cityNameCnData',
+			value: resultCityData
+		})
+		let resultWordData = ["#"];
+		wordData.map(function (item) {
+			return resultWordData.push(item);
+		});
+		this.cityData = resultCityData;
+		this.wordData = resultWordData;
+	},
+	setShowCity(data) {
+		this.showchoosecity = data.detail.isShow ? data.detail.isShow : 0
+	},
+	// 选择城市
+	onSelectCityTap(cityname, province) {
+		const _this = this
+		if (cityname) {
+			_this.chooseCurrentCity = cityname
+			_this.chooseCurrentProvince = typeof province === 'string' ? province : _this.getCurrentCityProvince(cityname)
+			_this.showchoosecity = 0
+			_this.$dispatch('onChooseCity', { city: cityname, province: _this.chooseCurrentProvince, showchoosecity: false });
+		}
+	},
+	// 获取省份
+	getCurrentCityProvince(cityname) {
+		const _this = this
+		let currentProvinceName = ''
+		if (cityname === '北京' || cityname === '上海' || cityname === '天津' || cityname === '重庆') {
+			return cityname
+		} else {
+			for (let x = 0; x < CityDataList.cityList.length; x++) {
+				for (let y = 0; y < CityDataList.cityList[x].list.length; y++) {
+					if (CityDataList.cityList[x].list[y].name === cityname) {
+						currentProvinceName = CityDataList.cityList[x].name
+						break
+					}
+				}
+			}
+		}
+		return currentProvinceName
+	},
+	// 滑动开始
+	wordTouchStart() {
+		this.isWordBoxTouch = true
+		this.currentWord = '';
+		console.log(1)
+	},
+	// 滑动选择城市
+	wordTouchMove: function (e) {
+		const _this = this;
+		let clientY = e.clientY ? e.clientY : e.touches[0].clientY
+		let wordData = _this.wordData;
+		let windowHeight = 0;
+		let currentHeight = 0;
+		let currentNum = 0;
+		let heightData = null;
+		device.getInfo({
+			success: function (systemInfo) {
+				currentHeight = Math.abs(clientY - _this.wordBoxTop)
+				currentNum = Math.ceil(currentHeight / _this.lineHeight) - 1
+				heightData = { windowHeight: windowHeight, currentHeight: currentHeight, currentNum: currentNum }
+				if (heightData.currentHeight < systemInfo.windowHeight) {
+					if (heightData.currentHeight < 20) {
+						_this.currentWord = wordData[0];
+						_this.$element('list').scrollTo({ index: 0 })
+					} else {
+						_this.currentWord = wordData[heightData.currentNum];
+						_this.$element('list').scrollTo({ index: heightData.currentNum })
+					}
+				} else {
+					_this.currentWord = wordData[wordData.length - 1];
+					_this.$element('list').scrollTo({ index: wordData.length - 1 })
+				}
+			}
+		});
+	},
+	wordClick: function (key, value) {
+		const _this = this;
+		_this.currentWord = value;
+		_this.$element('list').scrollTo({ index: key })
+		setTimeout(() => {
+			_this.currentWord = '';
+		}, 300)
+	},
+	// 滑动结束
+	wordTouchEnd() {
+		const _this = this
+		setTimeout(() => {
+			_this.isWordBoxTouch = false
+			_this.currentWord = '';
+		}, 200)
+	},
+	positionCity() {
+		const _this = this
+		let city = ''
+		storage.get({
+			key: 'locationCityData',
+			success: function (locationCityData) {
+				if (!locationCityData) {
+					geolocation.getLocation({
+						success: (res) => {
+							// //腾讯地图定位,逆地址解析
+							// qqmapsdk = new QQMapWX({ key: '你自己的key' });
+							// qqmapsdk.reverseGeocoder({
+							// 	location: {
+							// 		latitude: res.latitude,
+							// 		longitude: res.longitude
+							// 	},
+							// 	sig: 'HVqAvWt6c3lgwMmAm3DB3Q3cPDvjwP7p',
+							// 	success: function (resp) {
+							// 		city = resp.result.address_component.city;
+							// 		_this.dealPositionCity(city)
+							// 	},
+							// 	fail: function (resp) {
+							// 		console.log("未获取到当前定位")
+							// 	}
+							// })
+							//高德地图定位,获取POI数据,高德小程序获取次数当前（2019-10-23）为无限次
+							myAmapFun = new amapFile.AMapWX({ key: '你自己的key' });
+							myAmapFun.getRegeo({
+								success: function (data) {
+									if (data) {
+										let province = data[0].regeocodeData.addressComponent.province
+										if (province === '北京市' || province === '天津市' || province === '上海市' || province === '重庆市') {
+											_this.dealPositionCity(province)
+										} else {
+											_this.dealPositionCity(data[0].regeocodeData.addressComponent.city)
+										}
+									}
+								},
+								fail: function (info) {
+									prompt.showToast({ message: '未获取到当前定位' })
+								}
+							})
+						}
+					})
+					return;
+				} else {
+					locationCityData = JSON.parse(locationCityData)
+					_this.chooseCurrentCity = locationCityData.city
+				}
+			}
+		});
+	},
+	dealPositionCity(city) {
+		const _this = this
+		city = city.indexOf('市') > -1 ? city.replace('市', '') : city;
+		storage.set({
+			key: 'locationCityData',
+			value: {
+				city: city,
+				timemap: new Date().getTime()
+			}
+		});
+		_this.chooseCurrentCity = city
+		_this.positionCity = city
+		_this.chooseCurrentProvince = _this.getCurrentCityProvince(city)
+	}
+});
+</script>
+<style lang="less">
+.choose-city-wrapper {
+  flex-direction: column;
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 9999999;
+  background-color: #f5f7fa;
+}
+.choose-title {
+  justify-content: center;
+  align-items: center;
+  height: 52px;
+  background-color: #ffffff;
+  .close {
+    width: 40px;
+    height: 40px;
+    padding: 10px 10px;
+    image {
+      width: 20px;
+      height: 20px;
+    }
+  }
+}
+.choose-title .t {
+  width: 100%;
+  height: 40px;
+  font-size: 16px;
+  color: #1a1a1a;
+  padding-right: 40px;
+  text-align: center;
+}
+
+.choose-city-body {
+  flex-direction: column;
+}
+.list-head {
+  flex-direction: column;
+}
+.current-city-box {
+  flex-direction: column;
+  padding: 24px 16px 0;
+}
+
+.current-city-box .current-city-title,
+.hot-city-box .hot-city-title {
+  flex-direction: column;
+  width: 100%;
+  height: 36px;
+  padding-left: 5px;
+  padding-bottom: 12px;
+  text {
+    font-size: 15px;
+    color: #1a1a1a;
+  }
+}
+
+.current-city-box .city-item {
+  width: 316px;
+  height: 40px;
+  padding: 7px;
+  justify-content: center;
+  text-align: center;
+  align-items: center;
+  border-radius: 4px;
+  color: #1a1a1a;
+  font-size: 13px;
+  background-color: #ffffff;
+}
+
+.current-city-box .city-item image {
+  width: 15px;
+  height: 15px;
+  margin-right: 4px;
+}
+
+.current-city-box .city-item text {
+  font-size: 13px;
+  color: #1a1a1a;
+}
+
+.hot-city-box {
+  flex-direction: column;
+  padding: 24px 16px 0 12px;
+}
+
+.hot-city-list {
+  flex-direction: row;
+  height: 44px;
+  .city-item {
+    justify-content: center;
+    text-align: center;
+    width: 100px;
+    height: 36px;
+    border-radius: 4px;
+    margin: 0 4px 8px 4px;
+    background-color: #ffffff;
+    font-size: 13px;
+  }
+  .active {
+    border-color: #285bf6;
+    color: #285bf6;
+  }
+}
+.city-word-box {
+  flex-direction: column;
+  width: 100%;
+}
+
+.city-word-box .city-word-title {
+  height: 30px;
+  line-height: 30px;
+  padding-left: 16px;
+  font-size: 14px;
+  background-color: rgba(247, 247, 248, 1);
+}
+.city-word-list {
+  flex-direction: column;
+}
+
+.city-word-list .city-item {
+  flex-direction: column;
+  position: relative;
+  background-color: #ffffff;
+}
+.city-word-list .city-item text {
+  font-size: 15px;
+  padding: 15px 0 15px 16px;
+}
+.city-word-list .city-item .line {
+  width: 100%;
+  height: 1px;
+  background-color: rgba(57, 66, 77, 0.1);
+}
+
+.city-word-list .city-item:active {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.word-box {
+  flex-direction: column;
+  position: fixed;
+  align-items: center;
+  top: 0;
+  right: 0;
+  width: 40px;
+  height: 460px;
+  z-index: 9;
+
+  .word-item {
+    height: 20px;
+    align-items: center;
+    text {
+      font-size: 14px;
+      width: 24px;
+      text-align: center;
+      color: #27b7db;
+    }
+  }
+  .active {
+    background-color: rgba(0, 0, 0, 0.2);
+  }
+}
+.touch {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.show-word {
+  position: fixed;
+  z-index: 11;
+  left: 146px;
+  top: 270px;
+  width: 100px;
+  height: 100px;
+  border-radius: 9px;
+  font-size: 40px;
+  color: #ffffff;
+  text-align: center;
+  background-color: rgba(0, 0, 0, 0.65);
+}
+
+.show-word-overflow {
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  top: 0;
+  left: 0;
+  background-color: rgba(0, 0, 0, 0.05);
+}
+</style>
